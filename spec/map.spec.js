@@ -317,7 +317,7 @@ See the Apache Version 2.0 License for specific language governing permissions a
             // KO core's internal 'change' subscription for trackArrayChanges is not disposed (but will be
             // GCed when the array itself is). A possible future optimization for KO core would be to
             // remove/re-add trackArrayChanges based on whether num(trackArrayChange subscriptions) is zero.
-            expect(sourceArray.getSubscriptionsCount()).toBe(1); 
+            expect(sourceArray.getSubscriptionsCount()).toBeLessThan(2); 
         });
 
         it("is possible to nest mappings", function() {
@@ -388,6 +388,9 @@ See the Apache Version 2.0 License for specific language governing permissions a
                     }
                 });
 
+            // the mapped array will not be initialized until it is accessed, so this
+            mappedArray();
+                
             // See that each mapped item causes a subscription on the underlying observable
             expect(modelItem.name.getSubscriptionsCount()).toBe(0);
             underlyingArray.push(modelItem);
@@ -594,6 +597,21 @@ See the Apache Version 2.0 License for specific language governing permissions a
                     mappingWithDisposeCallback: function() {  }
                 });
             }).toThrow('\'mappingWithDisposeCallback\' cannot be used in conjunction with \'mapping\' or \'disposeItem\'.');
+        });
+        
+        it("should not call mapping functions before mapped value is accessed", function () {
+            var called = false,
+                sourceArray = ko.observableArray(sampleData.slice(0)),
+                mappedArray = sourceArray.map(function (item) {
+                    called = true; 
+                    return item; 
+                });
+            
+            expect(called).toBe(false);
+          
+            // after array is access the inialization should occur
+            mappedArray();
+            expect(called).toBe(true);
         });
     });
 })();

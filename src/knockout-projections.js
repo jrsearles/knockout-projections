@@ -267,13 +267,31 @@ See the Apache Version 2.0 License for specific language governing permissions a
         }, null, 'arrayChange');
     }
 
+    function initializeMappedArray(ko, inputObservableArray, mappingOptions, arrayOfState, outputObservableArray) {
+        // Initial state: map each of the inputs
+        var inputArray = inputObservableArray.peek(),
+            outputArray = outputObservableArray.peek();
+
+        for (var i = 0, ln = inputArray.length; i < ln; i++) {
+            var inputItem = inputArray[i],
+                stateItem = new StateItem(ko, inputItem, i, outputArray.length, mappingOptions, arrayOfState, outputObservableArray),
+                mappedValue = stateItem.mappedValueComputed.peek();
+
+            arrayOfState.push(stateItem);
+
+            if (stateItem.isIncluded) {
+                outputArray.push(mappedValue);
+            }
+        }
+
+        return respondToArrayStructuralChanges(ko, inputObservableArray, arrayOfState, outputArray, outputObservableArray, mappingOptions);
+    }
+
     // Mapping
     function observableArrayMap(ko, mappingOptions) {
         var inputObservableArray = this,
             arrayOfState = [],
-            outputArray = [],
-            outputObservableArray = ko.observableArray(outputArray),
-            originalInputArrayContents = inputObservableArray.peek();
+            outputObservableArray = ko.observableArray([]);
 
         // Shorthand syntax - just pass a function instead of an options object
         if (typeof mappingOptions === 'function') {
@@ -289,31 +307,35 @@ See the Apache Version 2.0 License for specific language governing permissions a
             throw new Error('Specify either \'mapping\' or \'mappingWithDisposeCallback\'.');
         }
 
-        // Initial state: map each of the inputs
-        for (var i = 0; i < originalInputArrayContents.length; i++) {
-            var inputItem = originalInputArrayContents[i],
-                stateItem = new StateItem(ko, inputItem, i, outputArray.length, mappingOptions, arrayOfState, outputObservableArray),
-                mappedValue = stateItem.mappedValueComputed.peek();
-            arrayOfState.push(stateItem);
-
-            if (stateItem.isIncluded) {
-                outputArray.push(mappedValue);
-            }
-        }
-
         // If the input array changes structurally (items added or removed), update the outputs
-        var inputArraySubscription = respondToArrayStructuralChanges(ko, inputObservableArray, arrayOfState, outputArray, outputObservableArray, mappingOptions);
+        var inputArraySubscription,
+            initialized = false;
 
         // Return value is a readonly computed which can track its own changes to permit chaining.
         // When disposed, it cleans up everything it created.
-        var returnValue = ko.computed(outputObservableArray).extend({ trackArrayChanges: true }),
+        var returnValue = ko.computed({
+            read: function () {
+                if (!initialized) {
+                    inputArraySubscription = initializeMappedArray(ko, inputObservableArray, mappingOptions, arrayOfState, outputObservableArray);
+                    initialized = true;
+                }
+
+                return outputObservableArray();
+            },
+            pure: true,  // use pure if knockout version supports it, otherwise it will fallback to normal computed
+            deferEvaluation: true // if pure isn't supported, we can still defer the initial evaluation
+        }).extend({ trackArrayChanges: true }),
             originalDispose = returnValue.dispose;
+
         returnValue.dispose = function() {
-            inputArraySubscription.dispose();
+            if (inputArraySubscription) {
+                inputArraySubscription.dispose();
+            }
+
             ko.utils.arrayForEach(arrayOfState, function(stateItem) {
                 stateItem.dispose();
             });
-            originalDispose.call(this, arguments);
+            originalDispose.call(this);
         };
 
         // Make projections chainable
